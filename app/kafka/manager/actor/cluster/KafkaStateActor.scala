@@ -83,6 +83,9 @@ case class KafkaManagedOffsetCache(clusterContext: ClusterContext) extends Runna
   val consumerTopicSetMap = new TrieMap[String, mutable.Set[String]]()
   val groupTopicPartitionMemberMap = new TrieMap[(String, String, Int), MemberMetadata]()
 
+  @volatile
+  private[this] var lastUpdateTimeMillis : Long = Long.MaxValue
+
   import KafkaManagedOffsetCache._
 
   require(isSupported(clusterContext.config.version), s"Kafka version not support : ${clusterContext.config}")
@@ -147,9 +150,10 @@ case class KafkaManagedOffsetCache(clusterContext: ClusterContext) extends Runna
                 }
               }
               topicSet += topic
+              lastUpdateTimeMillis = System.currentTimeMillis()
             } catch {
               case e: Exception =>
-                warn("Failed to process a message from offset topic!")
+                warn("Failed to process a message from offset topic!", e)
             }
           }
         }
@@ -174,6 +178,7 @@ case class KafkaManagedOffsetCache(clusterContext: ClusterContext) extends Runna
   def getConsumerTopics(group: String) : Set[String] = consumerTopicSetMap.get(group).map(_.toSet).getOrElse(Set.empty)
   def getTopicConsumers(topic: String) : Set[String] = topicConsumerSetMap.get(topic).map(_.toSet).getOrElse(Set.empty)
   def getConsumers : IndexedSeq[String] = consumerTopicSetMap.keys.toIndexedSeq
+  def getLastUpdateTimeMillis: Long = lastUpdateTimeMillis
 }
 
 case class ConsumerInstanceSubscriptions private(id: String, subs: Map[String, Int])
@@ -200,8 +205,6 @@ trait OffsetCache extends Logging {
   def getCacheTimeoutSecs: Int
 
   def getSimpleConsumerSocketTimeoutMillis: Int
-
-  def lastUpdateMillis : Long
 
   protected[this] implicit def ec: ExecutionContext
   
@@ -297,6 +300,8 @@ trait OffsetCache extends Logging {
 
   protected def getZKManagedConsumerList: IndexedSeq[ConsumerNameAndType]
 
+  protected def lastUpdateMillisZK : Long
+
   protected def getConsumerTopics(consumer: String) : Set[String] = {
     getConsumerTopicsFromOffsets(consumer) ++ getConsumerTopicsFromOwners(consumer) ++ getConsumerTopicsFromIds(consumer)
   }
@@ -368,6 +373,10 @@ trait OffsetCache extends Logging {
     kafkaManagedOffsetCache.fold(IndexedSeq.empty[ConsumerNameAndType]) {
       oc => oc.getConsumers.map(name => ConsumerNameAndType(name, KafkaManagedConsumer))
     }
+  }
+
+  final def lastUpdateMillis : Long = {
+    Math.max(lastUpdateMillisZK, kafkaManagedOffsetCache.map(_.getLastUpdateTimeMillis).getOrElse(Long.MinValue))
   }
 
   final def getConsumerDescription(consumer: String, consumerType: ConsumerType) : ConsumerDescription = {
@@ -496,7 +505,7 @@ case class OffsetCacheActive(curator: CuratorFramework,
     Try(consumersTreeCache.close())
   }
 
-  def lastUpdateMillis : Long = consumersTreeCacheLastUpdateMillis
+  protected def lastUpdateMillisZK : Long = consumersTreeCacheLastUpdateMillis
 
   protected def readConsumerOffsetByTopicPartition(consumer: String, topic: String, tpi: Map[Int, TopicPartitionIdentity]) : Map[Int, Long] = {
     tpi.map {
@@ -609,7 +618,7 @@ case class OffsetCachePassive(curator: CuratorFramework,
     Try(consumersPathChildrenCache.close())
   }
 
-  def lastUpdateMillis : Long = consumersTreeCacheLastUpdateMillis
+  protected def lastUpdateMillisZK : Long = consumersTreeCacheLastUpdateMillis
 
   protected def readConsumerOffsetByTopicPartition(consumer: String, topic: String, tpi: Map[Int, TopicPartitionIdentity]) : Map[Int, Long] = {
     tpi.map {
