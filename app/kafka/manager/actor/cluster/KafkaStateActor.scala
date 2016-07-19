@@ -95,7 +95,7 @@ case class KafkaManagedOffsetCache(clusterContext: ClusterContext) extends Runna
 
   private[this] def createKafkaConsumerConnector(): ConsumerConnector = {
     val props: Properties = new Properties()
-    props.put("group.id", "KafkaManagerOffsetCache")
+    props.put("group.id", "KafkaManagerOffsetCache2")
     props.put("zookeeper.connect", clusterContext.config.curatorConfig.zkConnect)
     props.put("exclude.internal.topics", "false")
     props.put("auto.commit.enable", "false")
