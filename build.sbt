@@ -87,3 +87,5 @@ rpmUrl := Some("https://github.com/yahoo/kafka-manager")
 rpmLicense := Some("Apache")
 
 /* End RPM Settings */
+
+scalacOptions ++= Seq("-Xmax-classfile-name", "200")
